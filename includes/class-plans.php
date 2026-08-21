@@ -218,4 +218,17 @@ class PHM_Plans {
 		$label  = $symbol . number_format( (float) $amount, fmod( (float) $amount, 1 ) ? 2 : 0 );
 		return $symbol ? $label : $label . ' ' . strtoupper( $currency );
 	}
+
+	/**
+	 * Human RAM/disk label. Plans under 1 GB used to render as "0 GB".
+	 */
+	public static function format_memory( $mb ) {
+		$mb = (float) $mb;
+		if ( $mb >= 1024 ) {
+			$gb = $mb / 1024;
+			$label = fmod( $gb, 1 ) ? number_format( $gb, 1 ) : (string) (int) $gb;
+			return $label . ' GB';
+		}
+		return (string) (int) $mb . ' MB';
+	}
 }

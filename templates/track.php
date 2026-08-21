@@ -41,8 +41,14 @@ if ( ! defined( 'ABSPATH' ) ) {
 							<a href="<?php echo esc_url( PHM_Settings::panel_url() ); ?>" target="_blank" rel="noopener"><?php echo esc_html( PHM_Settings::panel_url() ); ?></a>
 						<?php endif; ?>
 					</li>
-					<li><strong><?php esc_html_e( 'Server address:', 'pterodactyl-hosting' ); ?></strong>
-						<code><?php echo esc_html( $order->fqdn ? $order->fqdn : trim( $order->server_ip . ( $order->server_port && 25565 !== (int) $order->server_port ? ':' . $order->server_port : '' ), ':' ) ); ?></code></li>
+					<?php $public_address = PHM_Frontend::public_address( $order ); ?>
+					<?php if ( $public_address ) : ?>
+					<li><strong><?php esc_html_e( 'Hostname:', 'pterodactyl-hosting' ); ?></strong>
+						<code><?php echo esc_html( $public_address ); ?></code></li>
+					<?php else : ?>
+					<li><strong><?php esc_html_e( 'Connection:', 'pterodactyl-hosting' ); ?></strong>
+						<?php esc_html_e( 'Connect through the Game Panel — the node IP is private.', 'pterodactyl-hosting' ); ?></li>
+					<?php endif; ?>
 				<?php elseif ( 'failed' === $order->status && $order->error_message ) : ?>
 					<li class="phm-alert-error"><?php echo esc_html( $order->error_message ); ?></li>
 				<?php endif; ?>

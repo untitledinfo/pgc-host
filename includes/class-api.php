@@ -27,9 +27,10 @@ class PHM_API {
 		}
 
 		$url = $panel . self::BASE . '/' . ltrim( (string) $endpoint, '/' );
+		$is_write = in_array( strtoupper( $method ), [ 'POST', 'PATCH', 'PUT', 'DELETE' ], true );
 		$args = [
 			'method'  => strtoupper( $method ),
-			'timeout' => 45,
+			'timeout' => $is_write ? 90 : 45,
 			'headers' => [
 				'Authorization' => 'Bearer ' . $key,
 				'Accept'        => 'application/json',
@@ -95,7 +96,14 @@ class PHM_API {
 			}
 			if ( ! empty( $res['data']['data'] ) && is_array( $res['data']['data'] ) ) {
 				foreach ( $res['data']['data'] as $row ) {
-					$items[] = isset( $row['attributes'] ) ? $row['attributes'] : $row;
+					$item = isset( $row['attributes'] ) ? $row['attributes'] : $row;
+					// Relationships (egg variables, allocated resources, …)
+					// live next to attributes, not inside them. Without this
+					// merge, egg env vars never sync and server create fails.
+					if ( ! empty( $row['relationships'] ) && is_array( $row['relationships'] ) ) {
+						$item['relationships'] = $row['relationships'];
+					}
+					$items[] = $item;
 				}
 			}
 			$last  = isset( $res['data']['meta']['pagination']['total_pages'] ) ? (int) $res['data']['meta']['pagination']['total_pages'] : 1;
@@ -155,13 +163,27 @@ class PHM_API {
 	}
 
 	public static function create_user( $email, $username, $password = '' ) {
+		$username = preg_replace( '/[^a-zA-Z0-9._-]/', '', (string) $username );
+		$username = substr( $username, 0, 32 );
+		if ( strlen( $username ) < 3 ) {
+			$username = 'user' . wp_generate_password( 6, false, false );
+		}
+		$first = substr( $username, 0, 20 );
 		return self::request( 'POST', 'users', [
 			'email'      => $email,
 			'username'   => $username,
-			'first_name' => $username,
+			'first_name' => $first ? $first : 'Player',
 			'last_name'  => 'Customer',
 			'password'   => '' !== $password ? $password : wp_generate_password( 16, true, true ),
 		] );
+	}
+
+	/**
+	 * Live egg (with variables) — used at deploy time so we never create a
+	 * server with a stale/empty environment object.
+	 */
+	public static function egg( $nest_id, $egg_id ) {
+		return self::request( 'GET', 'nests/' . (int) $nest_id . '/eggs/' . (int) $egg_id . '?include=variables' );
 	}
 
 	/**

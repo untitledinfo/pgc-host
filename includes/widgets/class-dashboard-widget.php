@@ -1,6 +1,6 @@
-﻿<?php
+<?php
 /**
- * Elementor "User Server Dashboard" Widget.
+ * Elementor "Client Dashboard" Widget.
  *
  * @package Pterodactyl_Hosting
  */
@@ -18,7 +18,7 @@ class PHM_Widget_Dashboard extends \Elementor\Widget_Base {
 	}
 
 	public function get_title() {
-		return __( 'Client Dashboard & Servers (Pterodactyl)', 'pterodactyl-hosting' );
+		return __( 'Client Dashboard', 'pterodactyl-hosting' );
 	}
 
 	public function get_icon() {
@@ -30,12 +30,20 @@ class PHM_Widget_Dashboard extends \Elementor\Widget_Base {
 	}
 
 	public function get_keywords() {
-		return [ 'dashboard', 'servers', 'pterodactyl', 'client', 'tickets' ];
+		return [ 'dashboard', 'servers', 'pterodactyl', 'client', 'tickets', 'billing', 'hosting' ];
+	}
+
+	public function get_style_depends() {
+		return [ 'phm-frontend' ];
+	}
+
+	public function get_script_depends() {
+		return [ 'phm-frontend' ];
 	}
 
 	protected function register_controls() {
 		$this->start_controls_section( 'content_section', [
-			'label' => __( 'Dashboard Settings', 'pterodactyl-hosting' ),
+			'label' => __( 'Dashboard', 'pterodactyl-hosting' ),
 			'tab'   => \Elementor\Controls_Manager::TAB_CONTENT,
 		] );
 
@@ -44,17 +52,23 @@ class PHM_Widget_Dashboard extends \Elementor\Widget_Base {
 			'type'    => \Elementor\Controls_Manager::SELECT,
 			'default' => 'servers',
 			'options' => [
-				'servers' => __( 'My Servers', 'pterodactyl-hosting' ),
+				'servers' => __( 'My Services', 'pterodactyl-hosting' ),
+				'billing' => __( 'Billing', 'pterodactyl-hosting' ),
 				'tickets' => __( 'Support Tickets', 'pterodactyl-hosting' ),
 			],
 		] );
 
 		$this->end_controls_section();
+
+		PHM_Elementor::add_theme_style_controls( $this );
 	}
 
 	protected function render() {
 		$settings = $this->get_settings_for_display();
-		echo PHM_Dashboard::shortcode( [ 'tab' => isset( $settings['default_tab'] ) ? $settings['default_tab'] : 'servers' ] );
+		PHM_Frontend::enqueue_and_localize();
+		echo PHM_Dashboard::shortcode( [ // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+			'tab' => isset( $settings['default_tab'] ) ? $settings['default_tab'] : 'servers',
+		] );
 	}
 }
 

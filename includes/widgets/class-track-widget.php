@@ -1,6 +1,6 @@
 <?php
 /**
- * Elementor "Order / Checkout Cart" Widget.
+ * Elementor "Track Order" Widget.
  *
  * @package Pterodactyl_Hosting
  */
@@ -11,18 +11,18 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 if ( class_exists( '\Elementor\Widget_Base' ) ) :
 
-class PHM_Widget_Order extends \Elementor\Widget_Base {
+class PHM_Widget_Track extends \Elementor\Widget_Base {
 
 	public function get_name() {
-		return 'phm_order';
+		return 'phm_track';
 	}
 
 	public function get_title() {
-		return __( 'Hosting Checkout', 'pterodactyl-hosting' );
+		return __( 'Track Order', 'pterodactyl-hosting' );
 	}
 
 	public function get_icon() {
-		return 'eicon-cart';
+		return 'eicon-search';
 	}
 
 	public function get_categories() {
@@ -30,7 +30,7 @@ class PHM_Widget_Order extends \Elementor\Widget_Base {
 	}
 
 	public function get_keywords() {
-		return [ 'hosting', 'checkout', 'cart', 'order', 'pterodactyl', 'minecraft', 'deploy' ];
+		return [ 'track', 'order', 'status', 'hosting', 'pterodactyl' ];
 	}
 
 	public function get_style_depends() {
@@ -43,13 +43,13 @@ class PHM_Widget_Order extends \Elementor\Widget_Base {
 
 	protected function register_controls() {
 		$this->start_controls_section( 'content_section', [
-			'label' => __( 'Checkout', 'pterodactyl-hosting' ),
+			'label' => __( 'Tracking', 'pterodactyl-hosting' ),
 			'tab'   => \Elementor\Controls_Manager::TAB_CONTENT,
 		] );
 
 		$this->add_control( 'notice', [
 			'type' => \Elementor\Controls_Manager::RAW_HTML,
-			'raw'  => __( 'Renders the full game-server checkout: plan picker, subdomain, coupons, free-server deploy, and payment gateways. Inherits colors from the Theme Builder style tab.', 'pterodactyl-hosting' ),
+			'raw'  => __( 'Lets customers look up an order by number + email. Server IPs are never shown.', 'pterodactyl-hosting' ),
 		] );
 
 		$this->end_controls_section();
@@ -59,7 +59,7 @@ class PHM_Widget_Order extends \Elementor\Widget_Base {
 
 	protected function render() {
 		PHM_Frontend::enqueue_and_localize();
-		echo PHM_Frontend::shortcode_order( [] ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+		echo PHM_Frontend::shortcode_track(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
 	}
 }
 

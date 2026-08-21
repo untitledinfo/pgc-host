@@ -12,8 +12,8 @@ $here = home_url( add_query_arg( null, null ) );
 ?>
 <div class="phm-checkout-wrap">
 	<div class="phm-login-gate">
-		<h3><?php esc_html_e( 'Please log in to order', 'pterodactyl-hosting' ); ?></h3>
-		<p><?php esc_html_e( 'Your server plan is tied to your account — log in (or create one) and your name, email, and password carry straight over to your game panel login, no second password to remember.', 'pterodactyl-hosting' ); ?></p>
+		<h3><?php esc_html_e( 'Please log in', 'pterodactyl-hosting' ); ?></h3>
+		<p><?php esc_html_e( 'Your services are tied to your account. Log in (or create one) to continue — the same login is used for the website and the game panel.', 'pterodactyl-hosting' ); ?></p>
 		<p>
 			<a class="phm-btn phm-btn-primary" href="<?php echo esc_url( wp_login_url( $here ) ); ?>"><?php esc_html_e( 'Log in', 'pterodactyl-hosting' ); ?></a>
 			<?php if ( get_option( 'users_can_register' ) ) : ?>
