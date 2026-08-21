@@ -1,175 +1,258 @@
 <?php
-if ( ! defined( 'ABSPATH' ) ) exit;
+/**
+ * Support ticket system.
+ *
+ * Frontend: customers open + reply to tickets from the "Support Tickets"
+ * tab of [phm_dashboard] (see PHM_Dashboard). Admin: staff reply / close /
+ * reopen from wp-admin → PGC Hosting → Support Tickets (see admin/views/
+ * tickets.php and ticket-view.php).
+ *
+ * Lifecycle: open -> answered (staff replied) -> customer-reply (customer
+ * replied back) -> ... -> closed. "last_reply_by" is what each dashboard
+ * uses to show "waiting on you" vs "waiting on them".
+ *
+ * @package Pterodactyl_Hosting
+ */
 
-class Ptero_Tickets {
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
 
-	private static $instance = null;
-	public static function instance() {
-		if ( self::$instance === null ) self::$instance = new self();
-		return self::$instance;
+class PHM_Tickets {
+
+	const STATUSES  = [ 'open', 'customer-reply', 'answered', 'closed' ];
+	const PRIORITIES = [ 'low', 'normal', 'high' ];
+
+	public static function init() {
+		add_action( 'admin_post_phm_ticket_create', [ __CLASS__, 'handle_create' ] );
+		add_action( 'admin_post_phm_ticket_reply', [ __CLASS__, 'handle_reply' ] );
+		add_action( 'admin_post_phm_ticket_admin_reply', [ __CLASS__, 'handle_admin_reply' ] );
+		add_action( 'admin_post_phm_ticket_admin_status', [ __CLASS__, 'handle_admin_status' ] );
+
+		add_shortcode( 'phm_ticket_create', [ __CLASS__, 'shortcode_create' ] );
+		add_shortcode( 'phm_tickets', [ __CLASS__, 'shortcode_tickets' ] );
 	}
 
-	private function __construct() {
-		add_action( 'admin_menu', array( $this, 'menu' ), 22 );
-		add_shortcode( 'ptero_tickets', array( $this, 'render_tickets' ) );
-
-		add_action( 'wp_ajax_ptero_ticket_create', array( $this, 'ajax_create' ) );
-		add_action( 'wp_ajax_ptero_ticket_reply', array( $this, 'ajax_reply' ) );
-		add_action( 'admin_post_ptero_admin_ticket_reply', array( $this, 'admin_reply' ) );
-		add_action( 'admin_post_ptero_admin_ticket_status', array( $this, 'admin_set_status' ) );
-	}
-
-	public function menu() {
-		add_submenu_page( 'ptero-host', 'Tickets', 'Tickets', 'manage_options', 'ptero-host-tickets', array( $this, 'render_admin' ) );
-	}
-
-	private function t()  { global $wpdb; return $wpdb->prefix . 'ptero_tickets'; }
-	private function tr() { global $wpdb; return $wpdb->prefix . 'ptero_ticket_replies'; }
-
-	public function get_client_tickets( $client_id ) {
-		global $wpdb;
-		return $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$this->t()} WHERE client_id = %d ORDER BY updated_at DESC", $client_id ) );
-	}
-
-	public function get_ticket( $id ) {
-		global $wpdb;
-		return $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$this->t()} WHERE id = %d", $id ) );
-	}
-
-	public function get_replies( $ticket_id ) {
-		global $wpdb;
-		return $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$this->tr()} WHERE ticket_id = %d ORDER BY created_at ASC", $ticket_id ) );
-	}
-
-	public function ajax_create() {
-		check_ajax_referer( 'ptero_host_nonce', 'nonce' );
-		$client = Ptero_Client_Auth::instance()->current_client();
-		if ( ! $client ) wp_send_json_error( array( 'message' => __( 'Please log in.', 'ptero-host' ) ) );
-
-		$subject = sanitize_text_field( $_POST['subject'] ?? '' );
-		$message = wp_kses_post( $_POST['message'] ?? '' );
-		$dept    = sanitize_text_field( $_POST['department'] ?? 'general' );
-		if ( ! $subject || ! $message ) wp_send_json_error( array( 'message' => __( 'Subject and message are required.', 'ptero-host' ) ) );
-
-		global $wpdb;
-		$wpdb->insert( $this->t(), array(
-			'client_id'  => $client->id,
-			'subject'    => $subject,
-			'department' => $dept,
-			'server_id'  => ( $_POST['server_id'] ?? '' ) !== '' ? (int) $_POST['server_id'] : null,
-		) );
-		$ticket_id = $wpdb->insert_id;
-		$wpdb->insert( $this->tr(), array(
-			'ticket_id'   => $ticket_id,
-			'sender_type' => 'client',
-			'sender_name' => $client->name,
-			'message'     => $message,
-		) );
-
-		do_action( 'ptero_ticket_created', $ticket_id, $client );
-		wp_send_json_success( array( 'message' => __( 'Ticket submitted!', 'ptero-host' ), 'ticket_id' => $ticket_id ) );
-	}
-
-	public function ajax_reply() {
-		check_ajax_referer( 'ptero_host_nonce', 'nonce' );
-		$client = Ptero_Client_Auth::instance()->current_client();
-		if ( ! $client ) wp_send_json_error( array( 'message' => __( 'Please log in.', 'ptero-host' ) ) );
-
-		$ticket_id = (int) ( $_POST['ticket_id'] ?? 0 );
-		$ticket = $this->get_ticket( $ticket_id );
-		if ( ! $ticket || (int) $ticket->client_id !== (int) $client->id ) wp_send_json_error( array( 'message' => __( 'Ticket not found.', 'ptero-host' ) ) );
-
-		$message = wp_kses_post( $_POST['message'] ?? '' );
-		if ( ! $message ) wp_send_json_error( array( 'message' => __( 'Message cannot be empty.', 'ptero-host' ) ) );
-
-		global $wpdb;
-		$wpdb->insert( $this->tr(), array( 'ticket_id' => $ticket_id, 'sender_type' => 'client', 'sender_name' => $client->name, 'message' => $message ) );
-		$wpdb->update( $this->t(), array( 'status' => 'open', 'updated_at' => current_time( 'mysql' ) ), array( 'id' => $ticket_id ) );
-
-		wp_send_json_success( array( 'message' => __( 'Reply sent.', 'ptero-host' ) ) );
-	}
-
-	public function admin_reply() {
-		if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Unauthorized' );
-		$ticket_id = (int) ( $_POST['ticket_id'] ?? 0 );
-		check_admin_referer( 'ptero_ticket_reply_' . $ticket_id );
-
-		$message = wp_kses_post( $_POST['message'] ?? '' );
-		if ( $message ) {
-			global $wpdb;
-			$user = wp_get_current_user();
-			$wpdb->insert( $this->tr(), array( 'ticket_id' => $ticket_id, 'sender_type' => 'admin', 'sender_name' => $user->display_name, 'message' => $message ) );
-			$wpdb->update( $this->t(), array( 'status' => 'answered', 'updated_at' => current_time( 'mysql' ) ), array( 'id' => $ticket_id ) );
-		}
-		wp_redirect( admin_url( 'admin.php?page=ptero-host-tickets&view=' . $ticket_id ) );
-		exit;
-	}
-
-	public function admin_set_status() {
-		if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Unauthorized' );
-		$ticket_id = (int) ( $_GET['ticket_id'] ?? 0 );
-		check_admin_referer( 'ptero_ticket_status_' . $ticket_id );
-		global $wpdb;
-		$wpdb->update( $this->t(), array( 'status' => sanitize_text_field( $_GET['status'] ?? 'closed' ) ), array( 'id' => $ticket_id ) );
-		wp_redirect( admin_url( 'admin.php?page=ptero-host-tickets&view=' . $ticket_id ) );
-		exit;
-	}
-
-	public function render_admin() {
-		global $wpdb;
-		if ( isset( $_GET['view'] ) ) {
-			$ticket = $this->get_ticket( (int) $_GET['view'] );
-			$replies = $this->get_replies( (int) $_GET['view'] );
-			?>
-			<div class="wrap">
-				<h1>Ticket: <?php echo esc_html( $ticket->subject ?? '' ); ?></h1>
-				<p><a href="<?php echo esc_url( admin_url( 'admin.php?page=ptero-host-tickets' ) ); ?>">&larr; Back to all tickets</a></p>
-				<?php foreach ( $replies as $r ) : ?>
-					<div style="background:<?php echo $r->sender_type === 'admin' ? '#e7f3ff' : '#f6f7f7'; ?>;padding:12px;margin-bottom:8px;border-radius:6px;">
-						<strong><?php echo esc_html( $r->sender_name ); ?></strong> — <?php echo esc_html( $r->created_at ); ?>
-						<div><?php echo wp_kses_post( $r->message ); ?></div>
-					</div>
-				<?php endforeach; ?>
-				<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-					<?php wp_nonce_field( 'ptero_ticket_reply_' . $ticket->id ); ?>
-					<input type="hidden" name="action" value="ptero_admin_ticket_reply">
-					<input type="hidden" name="ticket_id" value="<?php echo (int) $ticket->id; ?>">
-					<textarea name="message" rows="4" class="large-text"></textarea>
-					<?php submit_button( 'Reply' ); ?>
-				</form>
-				<a href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=ptero_admin_ticket_status&status=closed&ticket_id=' . $ticket->id ), 'ptero_ticket_status_' . $ticket->id ) ); ?>" class="button">Close Ticket</a>
-			</div>
-			<?php return;
-		}
-
-		$tickets = $wpdb->get_results( "SELECT t.*, c.name AS client_name FROM {$this->t()} t LEFT JOIN {$wpdb->prefix}ptero_clients c ON c.id = t.client_id ORDER BY t.updated_at DESC LIMIT 200" );
-		?>
-		<div class="wrap">
-			<h1>Support Tickets</h1>
-			<table class="widefat striped">
-				<thead><tr><th>#</th><th>Client</th><th>Subject</th><th>Department</th><th>Status</th><th>Updated</th></tr></thead>
-				<tbody>
-				<?php if ( $tickets ) : foreach ( $tickets as $t ) : ?>
-					<tr>
-						<td>#<?php echo (int) $t->id; ?></td>
-						<td><?php echo esc_html( $t->client_name ); ?></td>
-						<td><a href="<?php echo esc_url( admin_url( 'admin.php?page=ptero-host-tickets&view=' . $t->id ) ); ?>"><?php echo esc_html( $t->subject ); ?></a></td>
-						<td><?php echo esc_html( $t->department ); ?></td>
-						<td><?php echo esc_html( ucfirst( $t->status ) ); ?></td>
-						<td><?php echo esc_html( $t->updated_at ); ?></td>
-					</tr>
-				<?php endforeach; else : ?>
-					<tr><td colspan="6">No tickets yet.</td></tr>
-				<?php endif; ?>
-				</tbody>
-			</table>
-		</div>
-		<?php
-	}
-
-	public function render_tickets( $atts ) {
+	public static function shortcode_create() {
+		PHM_Frontend::no_cache();
+		PHM_Frontend::enqueue_and_localize();
 		ob_start();
-		include PTEROHOST_PATH . 'templates/tickets.php';
+		require PHM_PATH . 'templates/ticket-create.php';
 		return ob_get_clean();
+	}
+
+	public static function shortcode_tickets() {
+		return PHM_Dashboard::shortcode( [ 'tab' => 'tickets' ] );
+	}
+
+	/* ---------------------------------------------------------------------
+	 * Labels
+	 * ------------------------------------------------------------------- */
+
+	public static function status_label( $status ) {
+		$labels = [
+			'open'           => __( 'Open', 'pterodactyl-hosting' ),
+			'customer-reply' => __( 'Awaiting staff reply', 'pterodactyl-hosting' ),
+			'answered'       => __( 'Answered — awaiting your reply', 'pterodactyl-hosting' ),
+			'closed'         => __( 'Closed', 'pterodactyl-hosting' ),
+		];
+		return isset( $labels[ $status ] ) ? $labels[ $status ] : $status;
+	}
+
+	public static function admin_status_label( $status ) {
+		$labels = [
+			'open'           => __( 'Open — new', 'pterodactyl-hosting' ),
+			'customer-reply' => __( 'Customer replied', 'pterodactyl-hosting' ),
+			'answered'       => __( 'Answered — awaiting customer', 'pterodactyl-hosting' ),
+			'closed'         => __( 'Closed', 'pterodactyl-hosting' ),
+		];
+		return isset( $labels[ $status ] ) ? $labels[ $status ] : $status;
+	}
+
+	public static function status_class( $status ) {
+		$map = [
+			'open'           => 'warning',
+			'customer-reply' => 'warning',
+			'answered'       => 'info',
+			'closed'         => 'muted',
+		];
+		return isset( $map[ $status ] ) ? $map[ $status ] : 'muted';
+	}
+
+	public static function priority_label( $priority ) {
+		$labels = [
+			'low'    => __( 'Low', 'pterodactyl-hosting' ),
+			'normal' => __( 'Normal', 'pterodactyl-hosting' ),
+			'high'   => __( 'High', 'pterodactyl-hosting' ),
+		];
+		return isset( $labels[ $priority ] ) ? $labels[ $priority ] : $priority;
+	}
+
+	private static function dashboard_url() {
+		$url = PHM_Store::page_url( 'phm_dashboard' );
+		return $url ? $url : home_url( '/' );
+	}
+
+	/* ---------------------------------------------------------------------
+	 * Customer: open a new ticket
+	 * ------------------------------------------------------------------- */
+
+	public static function handle_create() {
+		if ( ! is_user_logged_in() ) {
+			wp_die( esc_html__( 'Please log in first.', 'pterodactyl-hosting' ) );
+		}
+		check_admin_referer( 'phm_ticket_create' );
+
+		$wp_user  = wp_get_current_user();
+		$subject  = isset( $_POST['subject'] ) ? sanitize_text_field( wp_unslash( $_POST['subject'] ) ) : '';
+		$message  = isset( $_POST['message'] ) ? sanitize_textarea_field( wp_unslash( $_POST['message'] ) ) : '';
+		$priority = isset( $_POST['priority'] ) ? sanitize_key( wp_unslash( $_POST['priority'] ) ) : 'normal';
+		if ( ! in_array( $priority, self::PRIORITIES, true ) ) {
+			$priority = 'normal';
+		}
+
+		// Optional: link the ticket to one of the customer's own servers.
+		// Silently drop it if it doesn't belong to them, rather than error —
+		// this is a convenience field, not a security boundary.
+		$order_id = isset( $_POST['order_id'] ) ? (int) $_POST['order_id'] : 0;
+		if ( $order_id ) {
+			$order = PHM_DB::get_order( $order_id );
+			if ( ! $order || (int) $order->wp_user_id !== get_current_user_id() ) {
+				$order_id = 0;
+			}
+		}
+
+		if ( '' === $subject || '' === $message ) {
+			wp_safe_redirect( add_query_arg( [ 'phm_tab' => 'tickets', 'phm_msg' => 'ticket_missing' ], self::dashboard_url() ) );
+			exit;
+		}
+
+		$department = isset( $_POST['department'] ) ? sanitize_text_field( wp_unslash( $_POST['department'] ) ) : 'Technical';
+		$ticket_id  = PHM_DB::create_ticket( [
+			'wp_user_id' => get_current_user_id(),
+			'order_id'   => $order_id,
+			'department' => $department,
+			'subject'    => $subject,
+			'priority'   => $priority,
+		] );
+
+		PHM_DB::add_ticket_reply( $ticket_id, [
+			'wp_user_id'  => get_current_user_id(),
+			'author_name' => $wp_user->display_name,
+			'is_staff'    => 0,
+			'message'     => $message,
+		] );
+
+		$ticket = PHM_DB::get_ticket( $ticket_id );
+		PHM_Notifications::ticket_created( $ticket, $wp_user, $message );
+
+		wp_safe_redirect( add_query_arg(
+			[ 'phm_tab' => 'tickets', 'phm_ticket' => $ticket_id, 'phm_msg' => 'ticket_created' ],
+			self::dashboard_url()
+		) );
+		exit;
+	}
+
+	/* ---------------------------------------------------------------------
+	 * Customer: reply on their own ticket
+	 * ------------------------------------------------------------------- */
+
+	public static function handle_reply() {
+		if ( ! is_user_logged_in() ) {
+			wp_die( esc_html__( 'Please log in first.', 'pterodactyl-hosting' ) );
+		}
+		$id = isset( $_POST['ticket_id'] ) ? (int) $_POST['ticket_id'] : 0;
+		check_admin_referer( 'phm_ticket_reply_' . $id );
+
+		// Ownership check happens INSIDE the query — a ticket ID that isn't
+		// this WP user's simply returns null, same as "not found".
+		$ticket = PHM_DB::get_ticket_for_wp_user( $id, get_current_user_id() );
+		if ( ! $ticket ) {
+			wp_die( esc_html__( 'Ticket not found.', 'pterodactyl-hosting' ) );
+		}
+		if ( 'closed' === $ticket->status ) {
+			wp_safe_redirect( add_query_arg( [ 'phm_tab' => 'tickets', 'phm_ticket' => $id, 'phm_msg' => 'ticket_closed' ], self::dashboard_url() ) );
+			exit;
+		}
+
+		$message = isset( $_POST['message'] ) ? sanitize_textarea_field( wp_unslash( $_POST['message'] ) ) : '';
+		if ( '' === $message ) {
+			wp_safe_redirect( add_query_arg( [ 'phm_tab' => 'tickets', 'phm_ticket' => $id, 'phm_msg' => 'ticket_missing' ], self::dashboard_url() ) );
+			exit;
+		}
+
+		$wp_user = wp_get_current_user();
+		PHM_DB::add_ticket_reply( $id, [
+			'wp_user_id'  => get_current_user_id(),
+			'author_name' => $wp_user->display_name,
+			'is_staff'    => 0,
+			'message'     => $message,
+		] );
+		PHM_DB::update_ticket( $id, [ 'status' => 'customer-reply', 'last_reply_by' => 'customer' ] );
+
+		PHM_Notifications::ticket_customer_reply( $ticket, $wp_user, $message );
+
+		wp_safe_redirect( add_query_arg( [ 'phm_tab' => 'tickets', 'phm_ticket' => $id, 'phm_msg' => 'ticket_replied' ], self::dashboard_url() ) );
+		exit;
+	}
+
+	/* ---------------------------------------------------------------------
+	 * Staff: reply (optionally closing the ticket in the same action)
+	 * ------------------------------------------------------------------- */
+
+	public static function handle_admin_reply() {
+		if ( ! current_user_can( PHM_Admin::capability() ) ) {
+			wp_die( esc_html__( 'Permission denied.', 'pterodactyl-hosting' ) );
+		}
+		$id = isset( $_POST['ticket_id'] ) ? (int) $_POST['ticket_id'] : 0;
+		check_admin_referer( 'phm_ticket_admin_reply_' . $id );
+
+		$ticket = PHM_DB::get_ticket( $id );
+		if ( ! $ticket ) {
+			wp_safe_redirect( admin_url( 'admin.php?page=phm-tickets&phm_msg=missing' ) );
+			exit;
+		}
+
+		$message = isset( $_POST['message'] ) ? sanitize_textarea_field( wp_unslash( $_POST['message'] ) ) : '';
+		$close   = ! empty( $_POST['close'] );
+
+		if ( '' !== $message ) {
+			$admin_user = wp_get_current_user();
+			PHM_DB::add_ticket_reply( $id, [
+				'wp_user_id'  => get_current_user_id(),
+				'author_name' => $admin_user->display_name ? $admin_user->display_name : __( 'Support', 'pterodactyl-hosting' ),
+				'is_staff'    => 1,
+				'message'     => $message,
+			] );
+			PHM_Notifications::ticket_staff_reply( $ticket, $message );
+		}
+
+		PHM_DB::update_ticket( $id, [
+			'status'        => $close ? 'closed' : 'answered',
+			'last_reply_by' => 'staff',
+		] );
+
+		wp_safe_redirect( admin_url( 'admin.php?page=phm-tickets&view=' . $id . '&phm_msg=ticket_replied' ) );
+		exit;
+	}
+
+	/* ---------------------------------------------------------------------
+	 * Staff: change status only (reopen/close without leaving a message)
+	 * ------------------------------------------------------------------- */
+
+	public static function handle_admin_status() {
+		if ( ! current_user_can( PHM_Admin::capability() ) ) {
+			wp_die( esc_html__( 'Permission denied.', 'pterodactyl-hosting' ) );
+		}
+		$id = isset( $_GET['id'] ) ? (int) $_GET['id'] : 0;
+		check_admin_referer( 'phm_ticket_admin_status_' . $id );
+
+		$status = isset( $_GET['status'] ) ? sanitize_key( wp_unslash( $_GET['status'] ) ) : '';
+		if ( in_array( $status, self::STATUSES, true ) ) {
+			PHM_DB::update_ticket( $id, [ 'status' => $status ] );
+		}
+
+		wp_safe_redirect( admin_url( 'admin.php?page=phm-tickets&view=' . $id . '&phm_msg=saved' ) );
+		exit;
 	}
 }
