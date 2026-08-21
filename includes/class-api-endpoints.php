@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 /**
  * REST API Endpoints for Pterodactyl Hosting Manager.
  *
@@ -150,7 +150,7 @@ class PHM_API_Endpoints {
 				'egg_name'          => $o->egg_name,
 				'server_label'      => $o->server_label ? $o->server_label : $o->plan_name,
 				'status'            => $o->status,
-				'address'           => PHM_Frontend::public_address( $o ),
+				'address'           => $o->fqdn ? $o->fqdn : ( $o->server_ip ? $o->server_ip . ':' . $o->server_port : '' ),
 				'server_identifier' => $o->server_identifier,
 				'next_due_at'       => $o->next_due_at,
 			];

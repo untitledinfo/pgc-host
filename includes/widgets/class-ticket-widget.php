@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 /**
  * Elementor "Support Ticket System" Widget.
  *
@@ -18,7 +18,7 @@ class PHM_Widget_Ticket extends \Elementor\Widget_Base {
 	}
 
 	public function get_title() {
-		return __( 'Support Tickets', 'pterodactyl-hosting' );
+		return __( 'Support Ticket Box (Pterodactyl)', 'pterodactyl-hosting' );
 	}
 
 	public function get_icon() {
@@ -33,17 +33,9 @@ class PHM_Widget_Ticket extends \Elementor\Widget_Base {
 		return [ 'support', 'ticket', 'help', 'pterodactyl', 'chat' ];
 	}
 
-	public function get_style_depends() {
-		return [ 'phm-frontend' ];
-	}
-
-	public function get_script_depends() {
-		return [ 'phm-frontend' ];
-	}
-
 	protected function register_controls() {
 		$this->start_controls_section( 'content_section', [
-			'label' => __( 'Tickets', 'pterodactyl-hosting' ),
+			'label' => __( 'Ticket View Settings', 'pterodactyl-hosting' ),
 			'tab'   => \Elementor\Controls_Manager::TAB_CONTENT,
 		] );
 
@@ -52,23 +44,20 @@ class PHM_Widget_Ticket extends \Elementor\Widget_Base {
 			'type'    => \Elementor\Controls_Manager::SELECT,
 			'default' => 'create',
 			'options' => [
-				'create' => __( 'Ticket creation form', 'pterodactyl-hosting' ),
-				'list'   => __( 'Full tickets dashboard', 'pterodactyl-hosting' ),
+				'create' => __( 'Ticket Creation Form Only', 'pterodactyl-hosting' ),
+				'list'   => __( 'Full Tickets Dashboard & Chat', 'pterodactyl-hosting' ),
 			],
 		] );
 
 		$this->end_controls_section();
-
-		PHM_Elementor::add_theme_style_controls( $this );
 	}
 
 	protected function render() {
 		$settings = $this->get_settings_for_display();
-		PHM_Frontend::enqueue_and_localize();
 		if ( isset( $settings['mode'] ) && 'list' === $settings['mode'] ) {
-			echo PHM_Dashboard::shortcode( [ 'tab' => 'tickets' ] ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+			echo PHM_Dashboard::shortcode( [ 'tab' => 'tickets' ] );
 		} else {
-			echo PHM_Tickets::shortcode_create(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+			echo PHM_Tickets::shortcode_create();
 		}
 	}
 }

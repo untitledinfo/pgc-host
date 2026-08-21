@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 /**
  * Elementor "Order / Checkout Cart" Widget.
  *
@@ -18,7 +18,7 @@ class PHM_Widget_Order extends \Elementor\Widget_Base {
 	}
 
 	public function get_title() {
-		return __( 'Hosting Checkout', 'pterodactyl-hosting' );
+		return __( 'Hosting Order & Checkout (Pterodactyl)', 'pterodactyl-hosting' );
 	}
 
 	public function get_icon() {
@@ -30,36 +30,25 @@ class PHM_Widget_Order extends \Elementor\Widget_Base {
 	}
 
 	public function get_keywords() {
-		return [ 'hosting', 'checkout', 'cart', 'order', 'pterodactyl', 'minecraft', 'deploy' ];
-	}
-
-	public function get_style_depends() {
-		return [ 'phm-frontend' ];
-	}
-
-	public function get_script_depends() {
-		return [ 'phm-frontend' ];
+		return [ 'hosting', 'checkout', 'cart', 'order', 'pterodactyl', 'minecraft' ];
 	}
 
 	protected function register_controls() {
 		$this->start_controls_section( 'content_section', [
-			'label' => __( 'Checkout', 'pterodactyl-hosting' ),
+			'label' => __( 'Order Cart Settings', 'pterodactyl-hosting' ),
 			'tab'   => \Elementor\Controls_Manager::TAB_CONTENT,
 		] );
 
 		$this->add_control( 'notice', [
 			'type' => \Elementor\Controls_Manager::RAW_HTML,
-			'raw'  => __( 'Renders the full game-server checkout: plan picker, subdomain, coupons, free-server deploy, and payment gateways. Inherits colors from the Theme Builder style tab.', 'pterodactyl-hosting' ),
+			'raw'  => __( 'This widget renders the complete interactive game server checkout with subdomain selector, coupon codes, and 250+ payment gateways.', 'pterodactyl-hosting' ),
 		] );
 
 		$this->end_controls_section();
-
-		PHM_Elementor::add_theme_style_controls( $this );
 	}
 
 	protected function render() {
-		PHM_Frontend::enqueue_and_localize();
-		echo PHM_Frontend::shortcode_order( [] ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+		echo PHM_Frontend::shortcode_order([]);
 	}
 }
 

@@ -12,8 +12,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 class PHM_Notifications {
 
 	public static function order_placed( $order ) {
-		$s       = PHM_Settings::get();
-		$is_free = (float) $order->amount <= 0;
+		$s = PHM_Settings::get();
 
 		if ( ! empty( $s['notify_email_admin'] ) ) {
 			$subject = sprintf( '[%s] %s %s', get_bloginfo( 'name' ), __( 'New order', 'pterodactyl-hosting' ), $order->order_number );
@@ -51,16 +50,16 @@ class PHM_Notifications {
 
 	public static function server_deployed( $order ) {
 		$s    = PHM_Settings::get();
-		$addr = PHM_Frontend::public_address( $order );
-		if ( ! $addr ) {
-			$addr = __( 'Connect through the Game Panel (node IP is private)', 'pterodactyl-hosting' );
+		$addr = $order->fqdn ? $order->fqdn : $order->server_ip;
+		if ( ! $order->fqdn && $order->server_port && 25565 !== (int) $order->server_port ) {
+			$addr .= ':' . $order->server_port;
 		}
 
 		if ( ! empty( $s['notify_email_customer'] ) ) {
-			$subject = sprintf( __( 'Your server is live — %s', 'pterodactyl-hosting' ), $order->order_number );
+			$subject = sprintf( __( '🎮 Your server is live — %s', 'pterodactyl-hosting' ), $order->order_number );
 			$note    = $order->credential_note ? $order->credential_note : __( 'Use "Forgot password" on the panel login page if you don\'t know your password.', 'pterodactyl-hosting' );
 			$body    = sprintf(
-				"Hi %s,\n\nYour %s server is online!\n\nPanel:  %s\nLogin:  %s\n%s\nHostname: %s\n\nOrder: %s\n\n— %s",
+				"Hi %s,\n\nYour %s server is online!\n\nPanel:  %s\nLogin:  %s\n%s\nAddress: %s\n\nOrder: %s\n\n— %s",
 				$order->customer_name,
 				$order->plan_name,
 				PHM_Settings::panel_url(),
@@ -73,7 +72,7 @@ class PHM_Notifications {
 			wp_mail( $order->email, $subject, $body );
 		}
 
-		self::discord( sprintf( '✅ **Deployed %s** — server ID %s\n🌐 Hostname: `%s`', $order->order_number, $order->server_id, $addr ) );
+		self::discord( sprintf( '✅ **Deployed %s** — server ID %s\n🌐 Address: `%s`', $order->order_number, $order->server_id, $addr ) );
 	}
 
 	public static function renewal_reminder( $order ) {

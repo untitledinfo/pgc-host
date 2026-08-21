@@ -21,13 +21,9 @@ class PHM_Dashboard {
 		add_shortcode( 'phm_dashboard', [ __CLASS__, 'shortcode' ] );
 	}
 
-	public static function shortcode( $atts = [] ) {
+	public static function shortcode() {
 		PHM_Frontend::no_cache();
 		PHM_Frontend::enqueue_and_localize();
-
-		$atts = shortcode_atts( [
-			'tab' => 'servers',
-		], $atts, 'phm_dashboard' );
 
 		if ( ! is_user_logged_in() ) {
 			ob_start();
@@ -36,11 +32,7 @@ class PHM_Dashboard {
 		}
 
 		$user_id = get_current_user_id();
-		$allowed = [ 'servers', 'tickets', 'billing' ];
-		$tab     = isset( $_GET['phm_tab'] ) ? sanitize_key( wp_unslash( $_GET['phm_tab'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification
-		if ( ! in_array( $tab, $allowed, true ) ) {
-			$tab = in_array( $atts['tab'], $allowed, true ) ? $atts['tab'] : 'servers';
-		}
+		$tab     = isset( $_GET['phm_tab'] ) && 'tickets' === $_GET['phm_tab'] ? 'tickets' : 'servers'; // phpcs:ignore WordPress.Security.NonceVerification
 
 		$orders  = PHM_DB::get_orders_for_wp_user( $user_id );
 		$tickets = PHM_DB::get_tickets_for_wp_user( $user_id ); // small per-user list — always fetched, used for the nav badge too.
