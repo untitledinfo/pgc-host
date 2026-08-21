@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Pterodactyl Hosting Manager — Modern Storefront JS.
  * Handles dependent dropdowns, live subdomain check, coupon validation,
  * seamless checkout, live deployment progress, credentials display, and 1-click copy.
@@ -26,7 +26,10 @@
 	}
 
 	/* ---------- Clipboard copy helper ---------- */
+	var clipboardBound = false;
 	function initClipboard() {
+		if (clipboardBound) return;
+		clipboardBound = true;
 		document.addEventListener('click', function (e) {
 			var btn = e.target.closest('[data-copy]');
 			if (!btn) return;
@@ -34,14 +37,32 @@
 			var text = btn.getAttribute('data-copy');
 			if (!text) return;
 
+			function flash() {
+				var orig = btn.innerHTML;
+				btn.innerHTML = '✓ ' + (PHM_PUBLIC.i18n.copied || 'Copied!');
+				setTimeout(function () { btn.innerHTML = orig; }, 1500);
+			}
+
 			if (navigator.clipboard && navigator.clipboard.writeText) {
-				navigator.clipboard.writeText(text).then(function () {
-					var orig = btn.innerHTML;
-					btn.innerHTML = '✓ ' + (PHM_PUBLIC.i18n.copied || 'Copied!');
-					setTimeout(function () { btn.innerHTML = orig; }, 1500);
+				navigator.clipboard.writeText(text).then(flash).catch(function () {
+					fallbackCopy(text); flash();
 				});
+			} else {
+				fallbackCopy(text); flash();
 			}
 		});
+	}
+
+	function fallbackCopy(text) {
+		var ta = document.createElement('textarea');
+		ta.value = text;
+		ta.setAttribute('readonly', '');
+		ta.style.position = 'absolute';
+		ta.style.left = '-9999px';
+		document.body.appendChild(ta);
+		ta.select();
+		try { document.execCommand('copy'); } catch (err) { /* ignore */ }
+		document.body.removeChild(ta);
 	}
 
 	/* ---------- dependent egg dropdown & price calculation ---------- */
@@ -311,7 +332,7 @@
 					var o = res.data.order;
 					form.hidden = true;
 					if (result && res.data.deploying) {
-						startProgress(result, o);
+						startProgress(result, o, !!res.data.already_active);
 					} else if (result) {
 						result.hidden = false;
 						result.className = 'phm-result phm-result-ok';
@@ -343,10 +364,10 @@
 	}
 
 	/* ---------- live deploy progress bar & credentials modal ---------- */
-	function startProgress(result, order) {
+	function startProgress(result, order, alreadyActive) {
 		result.hidden = false;
 		result.className = 'phm-result phm-result-ok';
-		render(5, PHM_PUBLIC.i18n.deployTitle || 'Deploying your game server…');
+		render(alreadyActive ? 100 : 5, PHM_PUBLIC.i18n.deployTitle || 'Deploying your game server…');
 		result.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
 		function render(percent, label) {
@@ -383,10 +404,11 @@
 				'</div>' +
 				(o.server_address ?
 					'<div class="phm-cred-row">' +
-					'<span>Server IP/Address:</span>' +
+					'<span>Hostname:</span>' +
 					'<code>' + esc(o.server_address) + '</code>' +
 					'<button type="button" class="phm-copy-btn" data-copy="' + esc(o.server_address) + '">📋 Copy</button>' +
-					'</div>' : '') +
+					'</div>' :
+					'<div class="phm-cred-row"><span class="phm-hostname-private">' + esc(PHM_PUBLIC.i18n.connectViaPanel || 'Connect through the Game Panel — the server address is private.') + '</span></div>') +
 				'<div class="phm-cred-row">' +
 				'<span>Panel Username/Email:</span>' +
 				'<code>' + esc(o.email) + '</code>' +
@@ -443,9 +465,40 @@
 		return d.innerHTML;
 	}
 
-	if (document.readyState === 'loading') {
-		document.addEventListener('DOMContentLoaded', initCheckout);
-	} else {
+	var dashRefreshQueued = false;
+	function boot() {
 		initCheckout();
+		initClipboard();
+		if (!dashRefreshQueued && document.querySelector('.phm-card-provisioning, .phm-card-paid')) {
+			dashRefreshQueued = true;
+			setTimeout(function () { window.location.reload(); }, 8000);
+		}
 	}
+
+	function refreshNonce() {
+		post('phm_refresh_nonce', {}).then(function (res) {
+			if (res && res.success && res.data && res.data.nonce) {
+				PHM_PUBLIC.nonce = res.data.nonce;
+			}
+		}).catch(function () { /* ignore */ });
+	}
+
+	if (document.readyState === 'loading') {
+		document.addEventListener('DOMContentLoaded', function () {
+			boot();
+			refreshNonce();
+		});
+	} else {
+		boot();
+		refreshNonce();
+	}
+
+	if (window.jQuery) {
+		window.jQuery(window).on('elementor/frontend/init', function () {
+			if (window.elementorFrontend && window.elementorFrontend.hooks) {
+				window.elementorFrontend.hooks.addAction('frontend/element_ready/global', boot);
+			}
+		});
+	}
+	document.addEventListener('elementor/popup/show', boot);
 })();

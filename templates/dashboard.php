@@ -10,7 +10,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 $base_url     = remove_query_arg( [ 'phm_tab', 'phm_ticket', 'phm_msg' ] );
-$servers_url  = $base_url;
+$servers_url  = add_query_arg( [ 'phm_tab' => 'servers' ], $base_url );
+$billing_url  = add_query_arg( [ 'phm_tab' => 'billing' ], $base_url );
 $tickets_url  = add_query_arg( [ 'phm_tab' => 'tickets' ], $base_url );
 $banner       = $msg ? PHM_Dashboard::message( $msg ) : null;
 ?>
@@ -22,17 +23,22 @@ $banner       = $msg ? PHM_Dashboard::message( $msg ) : null;
 
 	<nav class="phm-dash-tabs">
 		<a href="<?php echo esc_url( $servers_url ); ?>" class="<?php echo 'servers' === $tab ? 'is-active' : ''; ?>">
-			<?php esc_html_e( 'My Servers', 'pterodactyl-hosting' ); ?>
+			<?php esc_html_e( 'My Services', 'pterodactyl-hosting' ); ?>
 			<span class="phm-tab-count"><?php echo (int) count( $orders ); ?></span>
 		</a>
+		<a href="<?php echo esc_url( $billing_url ); ?>" class="<?php echo 'billing' === $tab ? 'is-active' : ''; ?>">
+			<?php esc_html_e( 'Billing', 'pterodactyl-hosting' ); ?>
+		</a>
 		<a href="<?php echo esc_url( $tickets_url ); ?>" class="<?php echo 'tickets' === $tab ? 'is-active' : ''; ?>">
-			<?php esc_html_e( 'Support Tickets', 'pterodactyl-hosting' ); ?>
+			<?php esc_html_e( 'Support', 'pterodactyl-hosting' ); ?>
 			<?php if ( $awaiting_count ) : ?><span class="phm-tab-badge"><?php echo (int) $awaiting_count; ?></span><?php endif; ?>
 		</a>
 	</nav>
 
 	<?php if ( 'servers' === $tab ) : ?>
 		<?php require PHM_PATH . 'templates/dashboard-servers.php'; ?>
+	<?php elseif ( 'billing' === $tab ) : ?>
+		<?php require PHM_PATH . 'templates/dashboard-billing.php'; ?>
 	<?php elseif ( $ticket ) : ?>
 		<?php require PHM_PATH . 'templates/ticket-view.php'; ?>
 	<?php else : ?>

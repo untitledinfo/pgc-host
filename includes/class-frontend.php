@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * Storefront: shortcodes [phm_plans], [phm_order], [phm_track], [phm_ticket_create], [phm_tickets] and assets.
  *
@@ -16,7 +16,21 @@ class PHM_Frontend {
 		add_shortcode( 'phm_order', [ __CLASS__, 'shortcode_order' ] );
 		add_shortcode( 'phm_track', [ __CLASS__, 'shortcode_track' ] );
 		add_action( 'wp_enqueue_scripts', [ __CLASS__, 'register_assets' ] );
+		add_action( 'elementor/frontend/after_register_styles', [ __CLASS__, 'register_assets' ] );
 		add_action( 'elementor/frontend/after_enqueue_scripts', [ __CLASS__, 'enqueue_and_localize' ] );
+		add_action( 'elementor/editor/after_enqueue_styles', [ __CLASS__, 'enqueue_and_localize' ] );
+		add_action( 'elementor/preview/enqueue_styles', [ __CLASS__, 'enqueue_and_localize' ] );
+	}
+
+	/**
+	 * Customer-facing connect address. Never exposes the raw node IP —
+	 * hostname/subdomain only. Empty string means "connect via the panel".
+	 */
+	public static function public_address( $order ) {
+		if ( ! empty( $order->fqdn ) ) {
+			return (string) $order->fqdn;
+		}
+		return '';
 	}
 
 	public static function register_assets() {
@@ -54,6 +68,12 @@ class PHM_Frontend {
 	}
 
 	public static function enqueue_and_localize() {
+		if ( ! wp_style_is( 'phm-frontend', 'registered' ) ) {
+			wp_register_style( 'phm-frontend', PHM_URL . 'assets/frontend.css', [], PHM_VERSION );
+		}
+		if ( ! wp_script_is( 'phm-frontend', 'registered' ) ) {
+			wp_register_script( 'phm-frontend', PHM_URL . 'assets/frontend.js', [], PHM_VERSION, true );
+		}
 		wp_enqueue_style( 'phm-frontend' );
 		wp_enqueue_script( 'phm-frontend' );
 
@@ -96,6 +116,7 @@ class PHM_Frontend {
 				'copy'              => __( 'Copy', 'pterodactyl-hosting' ),
 				'copied'            => __( 'Copied! ✓', 'pterodactyl-hosting' ),
 				'applyingCoupon'    => __( 'Applying coupon…', 'pterodactyl-hosting' ),
+				'connectViaPanel'   => __( 'Connect through the Game Panel — the server address is private.', 'pterodactyl-hosting' ),
 			],
 		] );
 	}
@@ -120,7 +141,7 @@ class PHM_Frontend {
 	public static function render_plans( $args = [] ) {
 		self::no_cache();
 		self::enqueue_and_localize();
-		$args = wp_parse_args( $args, [ 'columns' => 3, 'nest' => 0 ] );
+		$args = wp_parse_args( $args, [ 'columns' => 3, 'nest' => 0, 'button_text' => '' ] );
 
 		$products  = array_values( array_filter( PHM_DB::get_products( true ), function ( $p ) use ( $args ) {
 			return ! $args['nest'] || (int) $p->nest_id === (int) $args['nest'];
