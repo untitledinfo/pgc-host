@@ -43,80 +43,17 @@ class PHM_Provisioning {
 	}
 
 	/**
-	 * Queue a background deploy. WP-Cron is unreliable on many hosts
-	 * (DISABLE_WP_CRON, loopback blocked, delayed), so we:
-	 *  1. schedule a single event as a backup,
-	 *  2. spawn_cron() to try to fire it now,
-	 *  3. also run on shutdown of the current request so free/auto
-	 *     deploys actually happen even when cron never ticks.
+	 * Queue a background deploy instead of running it inline in the AJAX
+	 * request — lets the storefront show a live progress bar instead of
+	 * one long spinner on the "Place order" button. WP-Cron fires the
+	 * single event via an (almost) immediate loopback request.
 	 */
 	public static function queue_deploy( $order_id ) {
-		$order_id = (int) $order_id;
-		self::set_stage( $order_id, 'queued' );
-
-		if ( ! wp_next_scheduled( 'phm_deploy_order_event', [ $order_id ] ) ) {
-			wp_schedule_single_event( time(), 'phm_deploy_order_event', [ $order_id ] );
+		self::set_stage( (int) $order_id, 'queued' );
+		if ( ! wp_next_scheduled( 'phm_deploy_order_event', [ (int) $order_id ] ) ) {
+			wp_schedule_single_event( time(), 'phm_deploy_order_event', [ (int) $order_id ] );
 		}
-		if ( function_exists( 'spawn_cron' ) ) {
-			spawn_cron();
-		}
-
-		add_action( 'shutdown', static function () use ( $order_id ) {
-			self::deploy( $order_id );
-		}, 1 );
-	}
-
-	/**
-	 * Run deploy in the current request (free plans, status poll kick).
-	 * Safe to call while a queue is also pending — deploy() no-ops once
-	 * a server exists and is locked against double-create.
-	 *
-	 * @return true|WP_Error
-	 */
-	public static function deploy_now( $order_id ) {
-		if ( function_exists( 'ignore_user_abort' ) ) {
-			ignore_user_abort( true );
-		}
-		if ( function_exists( 'set_time_limit' ) ) {
-			@set_time_limit( 120 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
-		}
-		return self::deploy( $order_id );
-	}
-
-	/**
-	 * If an order is paid/queued/provisioning but still has no server,
-	 * kick deploy from the status-poll AJAX request. This is the
-	 * self-heal for hosts where WP-Cron never runs.
-	 */
-	public static function maybe_kick_deploy( $order_id ) {
-		$order = PHM_DB::get_order( $order_id );
-		if ( ! $order || ! empty( $order->server_id ) ) {
-			return true;
-		}
-		$kickable = in_array( $order->status, [ 'paid', 'provisioning' ], true )
-			|| 'queued' === $order->stage
-			|| ( 'pending' === $order->status && (float) $order->amount <= 0 );
-		if ( ! $kickable ) {
-			return true;
-		}
-		return self::deploy_now( $order->id );
-	}
-
-	private static function lock_key( $order_id ) {
-		return 'phm_deploy_lock_' . (int) $order_id;
-	}
-
-	private static function acquire_lock( $order_id ) {
-		$key = self::lock_key( $order_id );
-		if ( get_transient( $key ) ) {
-			return false;
-		}
-		set_transient( $key, 1, 3 * MINUTE_IN_SECONDS );
-		return true;
-	}
-
-	private static function release_lock( $order_id ) {
-		delete_transient( self::lock_key( $order_id ) );
+		spawn_cron();
 	}
 
 	private static function set_stage( $order_id, $stage ) {
@@ -143,13 +80,6 @@ class PHM_Provisioning {
 		if ( ! PHM_Settings::is_configured() ) {
 			return self::fail( $order, __( 'Panel is not configured.', 'pterodactyl-hosting' ) );
 		}
-		if ( ! self::acquire_lock( $order->id ) ) {
-			return true; // another request is already deploying this order.
-		}
-
-		if ( function_exists( 'set_time_limit' ) ) {
-			@set_time_limit( 120 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
-		}
 
 		PHM_DB::update_order( $order->id, [ 'status' => 'provisioning' ] );
 		self::set_stage( $order->id, 'account' );
@@ -173,10 +103,6 @@ class PHM_Provisioning {
 				// to a random panel-only password otherwise, same as before.
 				$password = ! empty( $order->wp_user_id ) ? PHM_Password_Bridge::consume( (int) $order->wp_user_id ) : '';
 				$created  = PHM_API::create_user( $order->email, $username, $password );
-				if ( ( ! $created['ok'] || empty( $created['data']['attributes']['id'] ) ) && false !== stripos( (string) $created['error'], 'username' ) ) {
-					$username = self::username_from( $order->email, $order->customer_name . wp_generate_password( 4, false, false ) );
-					$created  = PHM_API::create_user( $order->email, $username, $password );
-				}
 				if ( ! $created['ok'] || empty( $created['data']['attributes']['id'] ) ) {
 					return self::fail( $order, 'Create user failed: ' . $created['error'] );
 				}
@@ -201,16 +127,32 @@ class PHM_Provisioning {
 		if ( ! $egg ) {
 			return self::fail( $order, sprintf( __( 'Egg #%d missing locally — run “Sync Now” in settings.', 'pterodactyl-hosting' ), $order->egg_id ) );
 		}
-		$built = self::environment_for_egg( $egg, $order );
-		$environment = $built['environment'];
-		if ( ! empty( $built['docker_image'] ) ) {
-			$egg->docker_image = $built['docker_image'];
+		$variables   = json_decode( (string) $egg->variables, true );
+		$environment = [];
+		if ( is_array( $variables ) ) {
+			foreach ( $variables as $var ) {
+				if ( empty( $var['env_variable'] ) ) {
+					continue;
+				}
+				$default = isset( $var['default'] ) ? (string) $var['default'] : '';
+				// Friendly defaults for common Minecraft-family eggs.
+				if ( 'SERVER_JARFILE' === $var['env_variable'] && '' === $default ) {
+					$default = 'server.jar';
+				}
+				if ( in_array( $var['env_variable'], [ 'MINECRAFT_VERSION', 'SERVER_VERSION', 'VANILLA_VERSION' ], true ) && '' === $default ) {
+					$default = 'latest';
+				}
+				if ( in_array( $var['env_variable'], [ 'BUILD_NUMBER', 'PAPER_BUILD' ], true ) && '' === $default ) {
+					$default = 'latest';
+				}
+				$environment[ $var['env_variable'] ] = $default;
+			}
 		}
-		if ( ! empty( $built['startup'] ) ) {
-			$egg->startup = $built['startup'];
-		}
-		if ( empty( $egg->docker_image ) || empty( $egg->startup ) ) {
-			return self::fail( $order, __( 'Egg is missing a Docker image or startup command — run “Sync Now” in settings.', 'pterodactyl-hosting' ) );
+		// SERVER_NAME only when the egg actually declares it — unknown keys are
+		// stripped by the panel, but sending fewer unknown keys keeps the
+		// request minimal and predictable.
+		if ( isset( $environment['SERVER_NAME'] ) ) {
+			$environment['SERVER_NAME'] = $order->subdomain ? $order->fqdn : ( $order->server_label ? $order->server_label : $order->plan_name );
 		}
 
 		// 3) Node with free capacity ---------------------------------------
@@ -306,23 +248,18 @@ class PHM_Provisioning {
 		}
 
 		// 7) Finalise -------------------------------------------------------
-		$final = [
+		PHM_DB::update_order( $order->id, [
 			'status'            => 'active',
 			'stage'             => 'done',
 			'server_id'         => (int) $server['id'],
 			'server_identifier' => isset( $server['identifier'] ) ? (string) $server['identifier'] : '',
 			'server_ip'         => (string) $ip,
 			'server_port'       => (int) $port,
+			'next_due_at'       => PHM_Billing::add_period(),
 			'reminder_sent'     => 0,
 			'dns_records'       => wp_json_encode( $dns_records ),
 			'error_message'     => '',
-		];
-		if ( (float) $order->amount > 0 ) {
-			$final['next_due_at'] = PHM_Billing::add_period();
-		}
-
-		PHM_DB::update_order( $order->id, $final );
-		self::release_lock( $order->id );
+		] );
 
 		PHM_DB::log( 'success', sprintf( 'Order %s deployed — server #%s.', $order->order_number, $server['id'] ) );
 		PHM_Notifications::server_deployed( PHM_DB::get_order( $order->id ) );
@@ -332,92 +269,12 @@ class PHM_Provisioning {
 	}
 
 	private static function fail( $order, $message ) {
-		self::release_lock( $order->id );
 		PHM_DB::update_order( $order->id, [
 			'status'        => 'failed',
 			'error_message' => $message,
 		] );
 		PHM_DB::log( 'error', sprintf( 'Order %s failed: %s', $order->order_number, $message ) );
 		return new WP_Error( 'phm_deploy', $message );
-	}
-
-	/**
-	 * Build the egg environment object. Prefers locally synced variables;
-	 * falls back to a live panel fetch so required keys are never missing.
-	 *
-	 * @param object $egg
-	 * @param object $order
-	 * @return array{environment:array,docker_image:string,startup:string}
-	 */
-	private static function environment_for_egg( $egg, $order ) {
-		$variables    = json_decode( (string) $egg->variables, true );
-		$docker_image = (string) $egg->docker_image;
-		$startup      = (string) $egg->startup;
-
-		if ( ! is_array( $variables ) || empty( $variables ) || '' === $docker_image || '' === $startup ) {
-			$live = PHM_API::egg( $egg->nest_id, $egg->egg_id );
-			if ( ! empty( $live['ok'] ) ) {
-				$attr = ! empty( $live['data']['attributes'] ) ? $live['data']['attributes'] : [];
-				if ( empty( $docker_image ) && ! empty( $attr['docker_image'] ) ) {
-					$docker_image = (string) $attr['docker_image'];
-				}
-				if ( empty( $docker_image ) && ! empty( $attr['docker_images'] ) && is_array( $attr['docker_images'] ) ) {
-					$first = reset( $attr['docker_images'] );
-					$docker_image = (string) $first;
-				}
-				if ( empty( $startup ) && ! empty( $attr['startup'] ) ) {
-					$startup = (string) $attr['startup'];
-				}
-				$rels = [];
-				if ( ! empty( $attr['relationships'] ) ) {
-					$rels = $attr['relationships'];
-				} elseif ( ! empty( $live['data']['relationships'] ) ) {
-					$rels = $live['data']['relationships'];
-				}
-				if ( empty( $variables ) && ! empty( $rels['variables']['data'] ) ) {
-					$variables = [];
-					foreach ( $rels['variables']['data'] as $var ) {
-						$a = isset( $var['attributes'] ) ? $var['attributes'] : [];
-						if ( empty( $a['env_variable'] ) ) {
-							continue;
-						}
-						$variables[] = [
-							'env_variable' => $a['env_variable'],
-							'default'      => isset( $a['default_value'] ) ? (string) $a['default_value'] : '',
-						];
-					}
-				}
-			}
-		}
-
-		$environment = [];
-		if ( is_array( $variables ) ) {
-			foreach ( $variables as $var ) {
-				if ( empty( $var['env_variable'] ) ) {
-					continue;
-				}
-				$default = isset( $var['default'] ) ? (string) $var['default'] : '';
-				if ( 'SERVER_JARFILE' === $var['env_variable'] && '' === $default ) {
-					$default = 'server.jar';
-				}
-				if ( in_array( $var['env_variable'], [ 'MINECRAFT_VERSION', 'SERVER_VERSION', 'VANILLA_VERSION' ], true ) && '' === $default ) {
-					$default = 'latest';
-				}
-				if ( in_array( $var['env_variable'], [ 'BUILD_NUMBER', 'PAPER_BUILD' ], true ) && '' === $default ) {
-					$default = 'latest';
-				}
-				$environment[ $var['env_variable'] ] = $default;
-			}
-		}
-		if ( isset( $environment['SERVER_NAME'] ) ) {
-			$environment['SERVER_NAME'] = $order->subdomain ? $order->fqdn : ( $order->server_label ? $order->server_label : $order->plan_name );
-		}
-
-		return [
-			'environment'  => $environment,
-			'docker_image' => $docker_image,
-			'startup'      => $startup,
-		];
 	}
 
 	/**
@@ -443,27 +300,12 @@ class PHM_Provisioning {
 	 */
 	private static function pick_node( $location_id, array $limits ) {
 		$nodes = $location_id ? PHM_DB::get_nodes_for_location( $location_id ) : PHM_DB::get_nodes();
-		if ( empty( $nodes ) ) {
-			$nodes = PHM_DB::get_nodes();
-		}
-
-		$candidates = [];
 		foreach ( (array) $nodes as $node ) {
-			$candidates[] = $node;
-		}
-		// Prefer public nodes, but fall back to any node — some panels mark
-		// every node as not-public and that previously blocked all deploys.
-		usort( $candidates, static function ( $a, $b ) {
-			return ( (int) $b->is_public ) - ( (int) $a->is_public );
-		} );
-
-		foreach ( $candidates as $node ) {
-			// Pterodactyl stores memory_overallocate / disk_overallocate as a
-			// PERCENT (20 = +20%), not extra megabytes.
-			$mem_cap  = (int) $node->memory * ( 1 + max( 0, (int) $node->memory_overallocate ) / 100 );
-			$disk_cap = (int) $node->disk * ( 1 + max( 0, (int) $node->disk_overallocate ) / 100 );
-			$free_mem  = $mem_cap - (int) $node->memory_used;
-			$free_disk = $disk_cap - (int) $node->disk_used;
+			if ( (int) $node->is_public !== 1 ) {
+				continue;
+			}
+			$free_mem  = ( $node->memory + max( 0, $node->memory_overallocate ) ) - $node->memory_used;
+			$free_disk = ( $node->disk + max( 0, $node->disk_overallocate ) ) - $node->disk_used;
 			if ( $free_mem >= $limits['memory'] && $free_disk >= $limits['disk'] ) {
 				return $node;
 			}
@@ -472,15 +314,11 @@ class PHM_Provisioning {
 	}
 
 	private static function username_from( $email, $name ) {
-		$local = strstr( (string) $email, '@', true );
-		$base  = strtolower( preg_replace( '/[^a-z0-9]/', '', (string) ( $local ? $local : $email ) ) );
+		$base = sanitize_user( strstr( $email, '@', true ) ?: $email, true );
 		if ( strlen( $base ) < 3 ) {
-			$base = strtolower( preg_replace( '/[^a-z0-9]/', '', (string) $name ) );
+			$base = sanitize_user( strstr( $name . 'user', '@', true ), true );
 		}
-		if ( strlen( $base ) < 3 ) {
-			$base = 'user';
-		}
-		return substr( $base, 0, 16 ) . wp_generate_password( 4, false, false );
+		return substr( $base, 0, 20 ) . wp_generate_password( 3, false, false );
 	}
 
 	/**

@@ -68,13 +68,11 @@ class PHM_Sync {
 						if ( empty( $attr['env_variable'] ) ) {
 							continue;
 						}
-						$rules = isset( $attr['rules'] ) ? (string) $attr['rules'] : '';
 						$variables[] = [
 							'name'         => isset( $attr['name'] ) ? $attr['name'] : $attr['env_variable'],
 							'env_variable' => $attr['env_variable'],
 							'default'      => isset( $attr['default_value'] ) ? (string) $attr['default_value'] : '',
-							'required'     => false !== stripos( $rules, 'required' ),
-							'rules'        => $rules,
+							'required'     => ! empty( $attr['user_viewable'] ),
 						];
 					}
 				}

@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 /**
  * Modern High-Performance Order / Checkout Template ("Subdomain Cart").
  * Variables: $products, $product (pre-selected or null), $nests, $methods, $wp_user.
@@ -40,7 +40,7 @@ $current_user = wp_get_current_user();
 							data-price="<?php echo esc_attr( PHM_Plans::format_price( (float) $p->price + (float) $p->setup_fee, $p->currency ) ); ?>"
 							<?php selected( $product && (int) $product->id === (int) $p->id ); ?> >
 							<?php echo esc_html( $p->name ); ?> — <?php echo esc_html( PHM_Plans::format_price( $p->price, $p->currency ) ); ?>/mo
-							(<?php echo esc_html( PHM_Plans::format_memory( $p->memory ) ); ?> RAM, <?php echo esc_html( PHM_Plans::format_memory( $p->disk ) ); ?> NVMe)
+							(<?php echo (int) round( $p->memory / 1024 ); ?> GB RAM, <?php echo (int) round( $p->disk / 1024 ); ?> GB NVMe)
 						</option>
 					<?php endforeach; ?>
 				</select>

@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 /**
  * AJAX endpoints.
  *
@@ -212,10 +212,7 @@ class PHM_Ajax {
 
 			$existing_user = get_user_by( 'email', $guest_email );
 			if ( $existing_user ) {
-				wp_send_json_error( [
-					'code'    => 'login_required',
-					'message' => __( 'An account with that email already exists. Please log in to continue.', 'pterodactyl-hosting' ),
-				] );
+				$wp_user = $existing_user;
 			} else {
 				if ( ! $guest_username ) {
 					$guest_username = sanitize_user( strstr( $guest_email, '@', true ), true );
@@ -359,19 +356,11 @@ class PHM_Ajax {
 			PHM_DB::update_order( $order_id, [ 'status' => 'paid' ] );
 			PHM_Provisioning::queue_deploy( $order_id );
 			$deploying = true;
-			// Free servers: also try to deploy in this request so the
-			// progress bar doesn't sit on "Queued" forever when WP-Cron
-			// is disabled. deploy() is locked + idempotent.
-			if ( $is_free ) {
-				PHM_Provisioning::deploy_now( $order_id );
-			}
 		}
 
-		$fresh = PHM_DB::get_order( $order_id );
 		wp_send_json_success( [
-			'order'          => self::order_payload( $fresh ),
-			'deploying'      => $deploying,
-			'already_active' => $fresh && 'active' === $fresh->status,
+			'order'     => self::order_payload( PHM_DB::get_order( $order_id ) ),
+			'deploying' => $deploying,
 		] );
 	}
 
@@ -383,19 +372,6 @@ class PHM_Ajax {
 
 		if ( ! $order ) {
 			wp_send_json_error( [ 'message' => __( 'Order not found.', 'pterodactyl-hosting' ) ] );
-		}
-
-		$owns = is_user_logged_in() && (int) $order->wp_user_id === get_current_user_id();
-		$staff = current_user_can( class_exists( 'PHM_Admin' ) ? PHM_Admin::capability() : 'manage_options' );
-		$fresh = ! empty( $order->created_at ) && strtotime( $order->created_at ) > ( time() - 20 * MINUTE_IN_SECONDS );
-		if ( ! $owns && ! $staff && ! $fresh ) {
-			wp_send_json_error( [ 'message' => __( 'Order not found.', 'pterodactyl-hosting' ) ] );
-		}
-
-		// Self-heal: if cron never fired, deploy from this poll.
-		if ( empty( $order->server_id ) && 'failed' !== $order->status ) {
-			PHM_Provisioning::maybe_kick_deploy( $order->id );
-			$order = PHM_DB::get_order( $order->id );
 		}
 
 		$stages  = PHM_Provisioning::stages();
@@ -415,7 +391,7 @@ class PHM_Ajax {
 	}
 
 	public static function order_payload( $order ) {
-		$address = PHM_Frontend::public_address( $order );
+		$address = $order->fqdn ? $order->fqdn : ( $order->server_ip ? trim( $order->server_ip . ( $order->server_port ? ':' . $order->server_port : '' ) ) : '' );
 
 		return [
 			'id'              => (int) $order->id,

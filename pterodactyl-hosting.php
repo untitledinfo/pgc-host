@@ -3,7 +3,7 @@
  * Plugin Name:       Pterodactyl Hosting Manager
  * Plugin URI:        https://github.com/untitledinfo/PGCHOST
  * Description:       Sell Pterodactyl game servers (Minecraft, Paper, Forge & any egg) from WordPress — Paymenter-style order flow with synced nests/eggs/locations, subdomain cart with automatic Cloudflare DNS, manual or WooCommerce payments and fully automatic server deployment.
- * Version:           3.1.0
+ * Version:           3.0.0
  * Requires at least: 5.8
  * Requires PHP:      7.4
  * Author:            PGCHOST

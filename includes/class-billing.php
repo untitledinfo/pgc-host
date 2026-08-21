@@ -43,9 +43,6 @@ class PHM_Billing {
 			return;
 		}
 		foreach ( (array) PHM_DB::orders_overdue() as $order ) {
-			if ( (float) $order->amount <= 0 ) {
-				continue; // free servers never auto-suspend.
-			}
 			self::suspend_overdue( $order );
 		}
 	}

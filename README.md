@@ -1,16 +1,4 @@
-# Pterodactyl Hosting Manager (v3.1.0)
-
-## What's new in 3.1.0 — deploy reliability, theme-aware UI, no public IPs, Elementor Theme Builder
-
-- **Deploy actually runs.** Free (and auto-deploy) orders no longer sit on “Queued” forever when WP-Cron is disabled. Deploy now runs in the checkout request, on shutdown, *and* is kicked again from the live progress poll if it still has no server. A lock prevents double-create.
-- **Free server create fixed.** $0 plans deploy immediately, skip payment emails, never get a due date, and are never auto-suspended. RAM/disk under 1 GB no longer render as “0 GB”.
-- **Node capacity math fixed.** Pterodactyl’s `memory_overallocate` / `disk_overallocate` are percents, not extra MB — this was rejecting valid nodes with “No node has enough free RAM/disk”. Public-only node filtering also no longer blocks panels that mark every node as not-public.
-- **Egg variables actually sync.** Pagination now keeps API `relationships`, so Paper/Minecraft env vars (and a live egg fetch at deploy time) are sent with `create server`. Docker image / startup are pulled live if the local cache is empty.
-- **Node IPs are never shown to customers.** Dashboard, track page, deploy success, REST API, and customer emails show hostname/subdomain only (or “connect via Game Panel”). Staff still see IPs in wp-admin.
-- **Theme matches WordPress / Elementor Theme Builder.** Storefront CSS inherits Elementor global colors, WordPress theme presets, and the page’s own font/color instead of forcing a dark cyberpunk skin. Cards, forms, and buttons work on light *and* dark themes.
-- **Animations.** Plan/service cards fade up, status dots pulse, deploy progress shimmers, success check pops. Respects `prefers-reduced-motion`.
-- **Elementor addons.** Seven widgets in the **PGC Hosting** category (Plans, Checkout, Dashboard, Tickets, Node Status, Track Order, Open Game Panel), each with Theme Builder style controls (global primary/text/card colors, typography, buttons, radius). Assets load in the editor and preview.
-- **Full hosting dashboard.** My Services + Billing + Support tabs: specs, hostname, plan, next due / “Free — no renewal”, manage-in-panel, tickets. Dashboard auto-refreshes while a server is deploying.
+# Pterodactyl Hosting Manager (v2.8.0)
 
 ## What's new in 2.8.0 — customer dashboard, support tickets, "Go to Server" fixed
 
